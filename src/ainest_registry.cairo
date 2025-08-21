@@ -25,11 +25,13 @@ mod AInestRegistry {
 
     #[derive(Drop, Serde, starknet::Store)]
     struct Dataset {
-        owner: ContractAddress,
+        originalOwner: ContractAddress,   // <— new, never changes
+        owner: ContractAddress,            // current owner
         name: ByteArray,
         ipfs_hash: felt252, 
         price: u256,
         category: ByteArray,
+        listed: bool,                      // <— new, replaces price=0 trick
     }
 
     #[event]
@@ -37,12 +39,14 @@ mod AInestRegistry {
     enum Event {
         DatasetRegistered: DatasetRegistered,
         DatasetTransferred: DatasetTransferred,
+        DatasetRelisted: DatasetRelisted,
     }
 
     #[derive(Drop, starknet::Event)]
     struct DatasetRegistered {
         dataset_id: u256,
         owner: ContractAddress,
+        originalOwner: ContractAddress,
         name: ByteArray,
         ipfs_hash: felt252,
         price: u256,
@@ -54,6 +58,13 @@ mod AInestRegistry {
         dataset_id: u256,
         from: ContractAddress,
         to: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct DatasetRelisted {
+        dataset_id: u256,
+        owner: ContractAddress,
+        price: u256,
     }
 
     #[constructor]
@@ -72,7 +83,7 @@ mod AInestRegistry {
         name: ByteArray,
         ipfs_hash: felt252,
         price: u256,
-        category: ByteArray
+        category: ByteArray,
     ) -> u256 {
         // Ensure dataset hash is unique
         let exists = self.ipfs_hashes.read(ipfs_hash);
@@ -93,11 +104,13 @@ mod AInestRegistry {
         self.datasets.write(
             dataset_id,
             Dataset { 
+                originalOwner: caller,   // <— set once
                 owner: caller, 
                 name: name_for_storage, 
                 ipfs_hash, 
                 price, 
-                category: category_for_storage 
+                category: category_for_storage,
+                listed: true              // <— newly registered = listed
             }
         );
 
@@ -105,6 +118,7 @@ mod AInestRegistry {
         self.emit(DatasetRegistered {
             dataset_id,
             owner: caller,
+            originalOwner: caller,
             name: name_for_event,
             ipfs_hash,
             price,
@@ -128,23 +142,20 @@ mod AInestRegistry {
 
     #[external(v0)]
     fn verify_ipfs_hash(self: @ContractState, ipfs_hash: felt252) -> bool {
-        // Returns true if hash exists (already registered)
         return self.ipfs_hashes.read(ipfs_hash);
     }
 
     #[external(v0)]
     fn purchase_dataset(ref self: ContractState, dataset_id: u256) {
-        // --- Reentrancy Guard ---
         assert(!self.is_purchasing.read(), 'Reentrancy guard');
         self.is_purchasing.write(true);
 
         let caller = get_caller_address();
         let dataset = self.datasets.read(dataset_id);
 
-        // --- Validations ---
         assert(!dataset.owner.is_zero(), 'Dataset does not exist');
         assert(dataset.owner != caller, 'Cannot purchase own dataset');
-        assert(!dataset.price.is_zero(), 'Dataset not for sale');
+        assert(dataset.listed, 'Dataset not for sale'); // <— new check
         assert(dataset.price >= 5_u256, 'Price too low for fee');
 
         let hash_exists = self.ipfs_hashes.read(dataset.ipfs_hash);
@@ -153,7 +164,7 @@ mod AInestRegistry {
         let seller = dataset.owner;
         let price = dataset.price;
 
-        // --- Transfer STRK from buyer to this contract ---
+        // Token transfers same as before
         let transfer_in = call_contract_syscall(
             self.strk_token.read(),
             selector!("transferFrom"),
@@ -166,12 +177,10 @@ mod AInestRegistry {
         );
         assert(transfer_in.is_ok(), 'Token transferFrom failed');
 
-        // --- Fee calculation ---
         let fee = price * 5_u256 / 100_u256;
         let remaining = price - fee;
         assert(!remaining.is_zero(), 'Remaining amount is zero');
 
-        // --- Transfer fee to marketplace ---
         let fee_transfer = call_contract_syscall(
             self.strk_token.read(),
             selector!("transfer"),
@@ -183,7 +192,6 @@ mod AInestRegistry {
         );
         assert(fee_transfer.is_ok(), 'Fee transfer failed');
 
-        // --- Transfer remaining amount to seller ---
         let seller_transfer = call_contract_syscall(
             self.strk_token.read(),
             selector!("transfer"),
@@ -195,19 +203,33 @@ mod AInestRegistry {
         );
         assert(seller_transfer.is_ok(), 'Seller transfer failed');
 
-        // --- Update dataset ownership ---
+        // Update dataset ownership
         self.datasets.write(dataset_id, Dataset {
+            originalOwner: dataset.originalOwner,
             owner: caller,
             name: dataset.name,
             ipfs_hash: dataset.ipfs_hash,
             price: dataset.price,
-            category: dataset.category
+            category: dataset.category,
+            listed: false                 // <— mark unlisted after purchase
         });
 
-        // --- Emit event ---
         self.emit(DatasetTransferred { dataset_id, from: seller, to: caller });
 
-        // --- Reset reentrancy guard ---
         self.is_purchasing.write(false);
+    }
+
+    #[external(v0)]
+    fn list_for_sale(ref self: ContractState, dataset_id: u256, new_price: u256) {
+        let caller = get_caller_address();
+        let mut ds = self.datasets.read(dataset_id);
+        assert(!ds.owner.is_zero(), 'Dataset does not exist');
+        assert(ds.owner == caller, 'Only owner can list');
+        assert(new_price > 0_u256, 'Price must be > 0');
+        ds.price = new_price;
+        ds.listed = true; // <— mark as listed
+        self.datasets.write(dataset_id, ds);
+
+        self.emit(DatasetRelisted { dataset_id, owner: caller, price: new_price });
     }
 }
