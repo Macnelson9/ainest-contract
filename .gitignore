@@ -3,3 +3,7 @@ target
 snfoundry_trace/
 coverage/
 profile/
+
+# sncast --account=sepolia deploy --class-hash=0x00192ee787b2f0aa212babb0c29ee3ac6e3feb0ae7aa97d76388428778a98bd1 --network=sepolia --constructor-calldata 0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d 0x005D31ce6810a3794e6B6359343c5FF9dda02246F08264891C11a92cf0D4509A
+
+# sncast --account=sepolia declare --contract-name=AInestRegistry --network=sepolia

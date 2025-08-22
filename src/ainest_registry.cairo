@@ -3,6 +3,7 @@ mod AInestRegistry {
     use starknet::ContractAddress;
     use starknet::get_caller_address;
     use starknet::get_contract_address;
+    use starknet::get_block_timestamp;
     use starknet::storage::Map;
     use starknet::storage::StorageMapReadAccess;
     use starknet::storage::StorageMapWriteAccess;
@@ -31,7 +32,12 @@ mod AInestRegistry {
         ipfs_hash: felt252, 
         price: u256,
         category: ByteArray,
-        listed: bool,                      // <— new, replaces price=0 trick
+        listed: bool,                      
+        description: ByteArray,
+        format: felt252, 
+        size: u256, 
+        createdAt: u64, 
+        downloads: u256, 
     }
 
     #[event]
@@ -51,6 +57,12 @@ mod AInestRegistry {
         ipfs_hash: felt252,
         price: u256,
         category: ByteArray,
+        listed: bool,                      
+        description: ByteArray,
+        format: felt252, 
+        size: u256, 
+        createdAt: u64, 
+        downloads: u256, 
     }
 
     #[derive(Drop, starknet::Event)]
@@ -84,6 +96,9 @@ mod AInestRegistry {
         ipfs_hash: felt252,
         price: u256,
         category: ByteArray,
+        description: ByteArray,
+        format: felt252,
+        size: u256
     ) -> u256 {
         // Ensure dataset hash is unique
         let exists = self.ipfs_hashes.read(ipfs_hash);
@@ -98,9 +113,15 @@ mod AInestRegistry {
 
         // Save dataset details
         let name_for_storage = name.clone();
-        let category_for_storage = category.clone();
         let name_for_event = name;
+        let category_for_storage = category.clone();
         let category_for_event = category;
+        let description_for_storage = description.clone();
+        let description_for_event = description;
+        let format = format;
+        let size = size;
+        let createdAt = get_block_timestamp();
+
         self.datasets.write(
             dataset_id,
             Dataset { 
@@ -110,7 +131,12 @@ mod AInestRegistry {
                 ipfs_hash, 
                 price, 
                 category: category_for_storage,
-                listed: true              // <— newly registered = listed
+                listed: true,              // <— newly registered = listed
+                description: description_for_storage,
+                format,
+                size,
+                createdAt,
+                downloads: 0_u256,       // <— initial downloads count
             }
         );
 
@@ -122,7 +148,13 @@ mod AInestRegistry {
             name: name_for_event,
             ipfs_hash,
             price,
-            category: category_for_event
+            category: category_for_event,
+            listed: true,              
+            description: description_for_event,
+            format,
+            size,
+            createdAt,
+            downloads: 0_u256,       
         });
 
         dataset_id
@@ -211,7 +243,12 @@ mod AInestRegistry {
             ipfs_hash: dataset.ipfs_hash,
             price: dataset.price,
             category: dataset.category,
-            listed: false                 // <— mark unlisted after purchase
+            listed: false,                // <— mark unlisted after purchase
+            description: dataset.description,
+            format: dataset.format,
+            size: dataset.size,
+            createdAt: dataset.createdAt,
+            downloads: dataset.downloads + 1_u256, 
         });
 
         self.emit(DatasetTransferred { dataset_id, from: seller, to: caller });
