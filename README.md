@@ -221,4 +221,152 @@ This MVP lays the foundation for a full-featured **AI dataset economy** powered 
 
 ---
 
-_Note: This documentation is strictly based on the provided smart contract code and does not include any assumptions or external features not present in the code._ --- IGNORE ---
+## 📖 Step-by-Step Usage
+
+This section explains **how to interact** with the AInest Registry smart contract, both directly (via contract calls) and through the frontend dApp.
+
+---
+
+### 1. **Dataset Registration** (Creator Flow)
+
+1. The creator connects their StarkNet wallet.
+2. They upload their dataset file to **IPFS** (via the dApp).
+3. The frontend collects dataset metadata:
+
+   - Name
+   - IPFS hash (CID)
+   - Price (in STRK)
+   - Category
+   - Description
+   - Format (CSV/JSON/etc.)
+   - File size
+
+4. The dApp calls:
+
+   ```rust
+   register_dataset(name, ipfs_hash, price, category, description, format, size)
+   ```
+
+5. The contract:
+
+   - Validates the IPFS hash is unique.
+   - Stores metadata & ownership details.
+   - Emits a `DatasetRegistered` event.
+
+6. The dataset is now **listed for sale** in the marketplace.
+
+---
+
+### 2. **Browsing Datasets** (Buyer Flow)
+
+1. The frontend queries:
+
+   - `get_dataset_count()` → total datasets.
+   - Iterates through `get_dataset(dataset_id)` for each dataset.
+
+2. Each dataset record returned includes:
+
+   - Name, Description, Category, Format, Size, IPFS hash.
+   - Owner & Original Owner.
+   - Price & Listed status.
+   - Downloads & Created timestamp.
+
+3. The frontend displays datasets **for sale** (where `listed = true`).
+
+---
+
+### 3. **Dataset Purchase** (Buyer Flow)
+
+1. The buyer selects a dataset.
+2. The frontend calls:
+
+   ```rust
+   purchase_dataset(dataset_id)
+   ```
+
+3. The contract flow:
+
+   - Verifies dataset exists, is listed, and not owned by the buyer.
+   - Transfers `price` in STRK from buyer → contract.
+   - Deducts **5% fee** → marketplace treasury.
+   - Sends remaining **95% to the seller**.
+   - Updates dataset ownership (buyer now owner).
+   - Increments downloads counter.
+   - Marks dataset as unlisted.
+   - Emits `DatasetTransferred`.
+
+4. The buyer can now retrieve the IPFS hash from `get_dataset(dataset_id)` and download the dataset off-chain.
+
+---
+
+### 4. **Relisting a Dataset** (Owner Flow)
+
+1. An owner who has purchased a dataset can relist it.
+2. The frontend calls:
+
+   ```rust
+   list_for_sale(dataset_id, new_price)
+   ```
+
+3. The contract:
+
+   - Confirms the caller is the dataset owner.
+   - Updates price.
+   - Sets `listed = true`.
+   - Emits `DatasetRelisted`.
+
+4. Dataset is now available for new buyers at the updated price.
+
+---
+
+### 5. **Verification Utilities**
+
+- **Check uniqueness of dataset**:
+
+  ```rust
+  verify_ipfs_hash(ipfs_hash) -> bool
+  ```
+
+  Returns `true` if the dataset hash is already registered.
+
+- **Get total datasets**:
+
+  ```rust
+  get_dataset_count() -> u256
+  ```
+
+- **Fetch dataset details**:
+
+  ```rust
+  get_dataset(dataset_id) -> Dataset
+  ```
+
+---
+
+## 🔄 Example End-to-End Flow
+
+1. **Creator Alice** registers a dataset (IPFS hash: `Qm123…`, Price: `100 STRK`, Category: "Healthcare").
+2. Contract assigns `dataset_id = 1`, saves metadata, and lists it for sale.
+3. **Buyer Bob** browses datasets, finds Alice’s dataset, and clicks _Purchase_.
+4. Bob pays `100 STRK`.
+
+   - `5 STRK` goes to marketplace treasury.
+   - `95 STRK` goes to Alice.
+
+5. Contract transfers dataset ownership to Bob, increments downloads, and unlists dataset.
+6. Bob downloads dataset using the IPFS hash.
+7. Later, Bob can relist it for `120 STRK` → emits `DatasetRelisted`.
+
+---
+
+## 🌐 Frontend Integration
+
+The frontend (React + Starknet.js) handles:
+
+- **IPFS Upload**: Uses Pinata API to store files.
+- **Dataset Registration**: Calls `register_dataset` with metadata & IPFS hash.
+- **Marketplace Display**: Fetches all datasets via `get_dataset_count` + `get_dataset`.
+- **Purchasing**: Executes `purchase_dataset`.
+- **Relisting**: Calls `list_for_sale`.
+
+---
